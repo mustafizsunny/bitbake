@@ -142,6 +142,9 @@ class EventWriter:
                 # queue all events until the file is inited
                 self.event_queue.append(event)
 
+import traceback
+intercepted = False
+
 #============================================================================#
 # BBCooker
 #============================================================================#
@@ -151,6 +154,22 @@ class BBCooker:
     """
 
     def __init__(self, featureSet=None, idleCallBackRegister=None):
+        global intercepted
+        if "_frozen_importlib" in sys.modules and "_thread" in sys.modules and hasattr(sys.modules["_frozen_importlib"], "_blocking_on") and not intercepted:
+            implib = sys.modules["_frozen_importlib"]
+            _thread = sys.modules["_thread"]
+            _blocking_on = implib._blocking_on
+
+            orig_acquire = implib._ModuleLock.acquire
+            def acquire(self):
+                tid = _thread.get_ident()
+                if tid in _blocking_on:
+                    bb.warn("\n".join(traceback.format_stack()))
+                return orig_acquire(self)
+
+            implib._ModuleLock.acquire = acquire
+            intercepted = True
+
         self.recipecaches = None
         self.eventlog = None
         self.skiplist = {}
@@ -744,19 +763,18 @@ class BBCooker:
                     taskdata[mc].add_unresolved(localdata[mc], self.recipecaches[mc])
                     mcdeps |= set(taskdata[mc].get_mcdepends())
                 new = False
-                for mc in self.multiconfigs:
-                    for k in mcdeps:
-                        if k in seen:
-                            continue
-                        l = k.split(':')
-                        depmc = l[2]
-                        if depmc not in self.multiconfigs:
-                            bb.fatal("Multiconfig dependency %s depends on nonexistent multiconfig configuration named configuration %s" % (k,depmc))
-                        else:
-                            logger.debug("Adding providers for multiconfig dependency %s" % l[3])
-                            taskdata[depmc].add_provider(localdata[depmc], self.recipecaches[depmc], l[3])
-                            seen.add(k)
-                            new = True
+                for k in mcdeps:
+                    if k in seen:
+                        continue
+                    l = k.split(':')
+                    depmc = l[2]
+                    if depmc not in self.multiconfigs:
+                        bb.fatal("Multiconfig dependency %s depends on nonexistent multiconfig configuration named configuration %s" % (k,depmc))
+                    else:
+                        logger.debug("Adding providers for multiconfig dependency %s" % l[3])
+                        taskdata[depmc].add_provider(localdata[depmc], self.recipecaches[depmc], l[3])
+                        seen.add(k)
+                        new = True
 
         for mc in self.multiconfigs:
             taskdata[mc].add_unresolved(localdata[mc], self.recipecaches[mc])
